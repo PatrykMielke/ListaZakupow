@@ -85,46 +85,31 @@ namespace Zbieracz_zamowien
             conn.Close();
         }
 
-        public static void AddNewOrder(DataGridView dataGridView, ComboBox client)
+        public static void AddNewList(DataGridView dataGridView, ComboBox client)
         {
             if (client.SelectedItem == null || dataGridView.Rows.Count < 1)
             {
-                return;
+                MessageBox.Show("Błąd");
             }
 
             // Get new ID_List 
 
-            int newId = 0;
-            SqlConnection conn = new SqlConnection(CONN);
-            SqlCommand cmd = new SqlCommand("select max(ID_Listy) id from Listy", conn);
-
-            conn.Open();
-            using (SqlDataReader reader = cmd.ExecuteReader())
+            int newID = GetNewListID();
+            if (newID == -1)
             {
-                while (reader.Read())
-                {
-                    if (reader.IsDBNull(0))
-                    {
-                        newId = 1;
-                    }
-                    else
-                    {
-                        newId = reader.GetInt16(0)+1;
-                    }
-                    
-                }
+                MessageBox.Show("Błąd połączenia z bazą");
+                return;
             }
-            conn.Close();
-            
+
             // Get All products
 
             List<string> products = new List<string>();
-            List<decimal> amount = new List<decimal>();
+            List<string> amount = new List<string>();
 
             for (int i = 0; i < dataGridView.Rows.Count; i++)
             {
                 products.Add(dataGridView.Rows[i].Cells[0].Value.ToString());
-                amount.Add((decimal)dataGridView.Rows[i].Cells[1].Value);
+                amount.Add((string)dataGridView.Rows[i].Cells[1].Value);
             }
 
             string insertCmd = "insert into Listy values ";
@@ -133,17 +118,114 @@ namespace Zbieracz_zamowien
             for (int i = 0; i < products.Count; i++)
             {
                 newParameter = "(";
-                newParameter += newId.ToString() + ",";
-                newParameter += products[i].ToString() + ",";
+                newParameter += newID.ToString() + ",";
+
+
+                newParameter += " (SELECT id_produktu from produkty where CONCAT([Nazwa produktu], ' ', Jednostka) = '" + products[i].ToString() + "'), ";
                 newParameter += amount[i];
                 newParameter += ")";
+
+                //remove , at the end
+
                 if (i < products.Count-1) newParameter += ",";
 
                 insertCmd += newParameter;
+                
             }
-            MessageBox.Show(insertCmd);
 
+            try
+            {
+                SqlConnection conn = new SqlConnection(CONN);
+                SqlCommand cmd = new SqlCommand(insertCmd, conn);
+                conn.Open();
+                cmd.ExecuteNonQuery();
+                conn.Close();
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show(e.Message);
+                return;
+            }
+            AddNewOrder(newID,(string)client.SelectedItem);
+            
+        }
+        private static int GetNewListID()
+        {
+            var newID = 1;
+            SqlConnection conn = new SqlConnection(CONN);
+            SqlCommand cmd = new SqlCommand("select max(ID_Listy) id from Listy", conn);
 
+            try
+            {
+                conn.Open();
+                using (SqlDataReader reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        if (!reader.IsDBNull(0))
+                        {
+                            newID = reader.GetInt32(0) + 1;
+                        }
+                    }
+                }
+
+                conn.Close();
+                return newID;
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show(e.Message);
+                return -1;
+            }
+            
+        }
+
+        private static void AddNewOrder(int newID, string client)
+        {
+            try
+            {
+                SqlConnection conn = new SqlConnection(CONN);
+                SqlCommand cmd = new SqlCommand("insert into zamowienia values ( (select ID_Kontrahenta\r\nfrom kontrahenci\r\nwhere [Nazwa kontrahenta] = @klient), @lista, getdate())", conn);
+                cmd.Parameters.AddWithValue("@klient", client);
+                cmd.Parameters.AddWithValue("@lista", newID);
+
+                conn.Open();
+                cmd.ExecuteNonQuery();
+                conn.Close();
+            }
+            catch (Exception e)
+            {
+                MessageBox.Show(e.Message);
+                return;
+            }
+        }
+
+        internal static void GroupUp(DateTime date,DataGridView dataGridView)
+        {
+            SqlConnection conn = new SqlConnection(CONN);
+
+            string query = @"
+                select concat(p.[Nazwa produktu],' ',p.Jednostka) produkt, sum(l.Ilosc) ilosc
+                from produkty p inner join listy l on p.ID_Produktu = l.ID_Produktu inner join Zamowienia z on z.ID_Listy = l.ID_Listy
+                where z.Data = @date
+                group by [Nazwa produktu], Jednostka
+            ";
+
+            SqlCommand cmd = new SqlCommand(query, conn);
+            cmd.Parameters.AddWithValue("@date", date.Date);
+            conn.Open();
+            using (SqlDataReader reader = cmd.ExecuteReader())
+            {
+                while(reader.Read())
+                {
+                    dataGridView.Rows.Add(reader.GetString(0) ,reader.GetDecimal(1));
+                }
+            }
+            conn.Close();
+            if(dataGridView.Rows.Count < 1)
+            {
+                MessageBox.Show("Brak zamówień na dany dzień");
+            }
         }
     }
 }
